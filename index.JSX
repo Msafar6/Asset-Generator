@@ -1,0 +1,405 @@
+import { useState, useRef } from "react";
+
+const CATEGORIES = [
+  {
+    id: "player",
+    label: "Player",
+    icon: "⚔️",
+    color: "#00f5c4",
+    presets: ["2D platformer hero", "RPG warrior", "Sci-fi soldier", "Wizard mage", "Ninja assassin"],
+  },
+  {
+    id: "enemy",
+    label: "Enemies",
+    icon: "👾",
+    color: "#ff4d6d",
+    presets: ["Goblin grunt", "Flying bat", "Undead skeleton", "Slime blob", "Boss dragon"],
+  },
+  {
+    id: "environment",
+    label: "Environment",
+    icon: "🌍",
+    color: "#ffd60a",
+    presets: ["Forest tileset", "Dungeon brick wall", "Space nebula bg", "Desert canyon", "Ice cave"],
+  },
+  {
+    id: "ui",
+    label: "UI / HUD",
+    icon: "🖥️",
+    color: "#a78bfa",
+    presets: ["Health bar", "Inventory grid", "Skill button set", "Main menu screen", "Dialogue box"],
+  },
+  {
+    id: "item",
+    label: "Items",
+    icon: "🗡️",
+    color: "#fb923c",
+    presets: ["Health potion", "Magic sword", "Shield icon", "Gold coin", "Key pickup"],
+  },
+  {
+    id: "vfx",
+    label: "VFX / FX",
+    icon: "✨",
+    color: "#22d3ee",
+    presets: ["Explosion burst", "Magic spell circle", "Blood splatter", "Smoke puff", "Lightning bolt"],
+  },
+];
+
+const STYLES = ["Pixel Art (16x16)", "Pixel Art (32x32)", "Pixel Art (64x64)", "Cartoon / Flat", "Painterly / Hand-drawn", "Low-poly 3D render", "Isometric", "Dark Fantasy", "Cute / Kawaii", "Sci-Fi / Neon"];
+const COLORS = ["Vibrant & colorful", "Muted / earthy tones", "Monochrome", "Neon / glowing", "Pastel soft", "Dark & gritty"];
+
+export default function App() {
+  const [activeCategory, setActiveCategory] = useState(CATEGORIES[0]);
+  const [prompt, setPrompt] = useState("");
+  const [style, setStyle] = useState(STYLES[0]);
+  const [colorPalette, setColorPalette] = useState(COLORS[0]);
+  const [transparent, setTransparent] = useState(true);
+  const [animated, setAnimated] = useState(false);
+  const [result, setResult] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [history, setHistory] = useState([]);
+  const [error, setError] = useState(null);
+  const textareaRef = useRef();
+
+  const handlePreset = (p) => setPrompt(p);
+
+  const buildSystemPrompt = () =>
+    `You are a Unity game asset designer AI. Your job is to produce extremely detailed, copy-paste-ready asset descriptions and sprite/texture specifications for Unity game developers.
+
+When given an asset request, respond with a structured JSON object (and ONLY JSON, no markdown fences) with these fields:
+{
+  "assetName": "short name for the asset",
+  "unityType": "Sprite | Texture2D | UI Image | Particle System | etc",
+  "resolution": "e.g. 32x32, 128x128, 512x512",
+  "description": "vivid visual description of the asset for an artist or AI image generator",
+  "colorHex": ["#hex1", "#hex2", "#hex3", "#hex4"],
+  "layers": ["list of visual layers or components"],
+  "animationFrames": "number of frames if animated, or null if static",
+  "unitySettings": {
+    "filterMode": "Point | Bilinear | Trilinear",
+    "textureType": "Sprite | Default | Normal Map | etc",
+    "pixelsPerUnit": 16 or 32 or 100,
+    "compression": "None | Low | Normal | High"
+  },
+  "imagePrompt": "a detailed, ready-to-use prompt for an AI image generator like Midjourney or DALL-E to generate this exact asset",
+  "tags": ["array", "of", "tags"],
+  "tips": ["Unity-specific implementation tip 1", "tip 2"]
+}`;
+
+  const generate = async () => {
+    if (!prompt.trim()) return;
+    setLoading(true);
+    setError(null);
+    setResult(null);
+
+    const userMsg = `Category: ${activeCategory.label}
+Asset: ${prompt}
+Style: ${style}
+Color palette: ${colorPalette}
+Transparent background: ${transparent}
+Animated: ${animated}`;
+
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true",
+        },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-5-20250929",
+          max_tokens: 1500,
+          system: buildSystemPrompt(),
+          messages: [{ role: "user", content: userMsg }],
+        }),
+      });
+      const rawText = await res.text();
+      let data;
+      try { data = JSON.parse(rawText); } catch(e) { throw new Error("Bad response: " + rawText.slice(0, 200)); }
+      if (!res.ok) throw new Error(data?.error?.message || `API error ${res.status}: ${rawText.slice(0,200)}`);
+      const text = (data.content || []).map((b) => b.text || "").join("");
+      if (!text) throw new Error("Empty response. Raw: " + rawText.slice(0, 300));
+      // Strip markdown fences, extract first JSON block
+      const stripped = text.replace(/```[\w]*\n?/g, "").trim();
+      const jsonMatch = stripped.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) throw new Error("No JSON found. Got: " + stripped.slice(0, 200));
+      const parsed = JSON.parse(jsonMatch[0]);
+      setResult(parsed);
+      setHistory((h) => [{ prompt, category: activeCategory.label, style, result: parsed }, ...h.slice(0, 9)]);
+    } catch (e) {
+      setError("Error: " + (e.message || String(e)));
+    }
+    setLoading(false);
+  };
+
+  const copyPrompt = () => {
+    if (result?.imagePrompt) navigator.clipboard.writeText(result.imagePrompt);
+  };
+
+  const cat = activeCategory;
+
+  return (
+    <div style={{
+      minHeight: "100vh",
+      background: "#0a0a0f",
+      fontFamily: "'Space Mono', 'Courier New', monospace",
+      color: "#e2e8f0",
+      padding: "0 0 60px",
+    }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Rajdhani:wght@500;700&display=swap');
+        * { box-sizing: border-box; }
+        ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: #111; } ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+        .cat-btn { border: none; cursor: pointer; border-radius: 8px; padding: 10px 16px; font-family: inherit; font-size: 13px; font-weight: 700; letter-spacing: 1px; transition: all 0.18s; }
+        .cat-btn:hover { transform: translateY(-2px); }
+        .preset-chip { border: none; cursor: pointer; background: #1a1a2e; color: #94a3b8; border-radius: 20px; padding: 5px 14px; font-size: 12px; font-family: inherit; transition: all 0.15s; }
+        .preset-chip:hover { background: #252545; color: #e2e8f0; }
+        .gen-btn { border: none; cursor: pointer; border-radius: 8px; font-family: inherit; font-size: 15px; font-weight: 700; letter-spacing: 2px; padding: 16px 40px; transition: all 0.2s; }
+        .gen-btn:hover:not(:disabled) { transform: translateY(-2px); filter: brightness(1.15); }
+        .gen-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .copy-btn { border: none; cursor: pointer; background: #1e293b; color: #94a3b8; border-radius: 6px; padding: 6px 14px; font-size: 12px; font-family: inherit; transition: all 0.15s; }
+        .copy-btn:hover { background: #334155; color: #e2e8f0; }
+        .hex-swatch { display: inline-block; width: 28px; height: 28px; border-radius: 6px; border: 2px solid #ffffff20; }
+        .hist-card { background: #111120; border: 1px solid #1e1e3a; border-radius: 8px; padding: 10px 14px; cursor: pointer; transition: border-color 0.15s; }
+        .hist-card:hover { border-color: #334155; }
+        select { appearance: none; -webkit-appearance: none; }
+        textarea:focus, select:focus { outline: none; }
+        .pulse { animation: pulse 1.5s ease-in-out infinite; }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+        .fade-in { animation: fadeIn 0.4s ease; }
+        @keyframes fadeIn { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
+        .tag { display: inline-block; background: #1e293b; color: #64748b; border-radius: 4px; padding: 2px 8px; font-size: 11px; margin: 2px; }
+      `}</style>
+
+      {/* Header */}
+      <div style={{ borderBottom: "1px solid #1a1a2e", padding: "24px 32px 20px", display: "flex", alignItems: "center", gap: 16, background: "#08080e" }}>
+        <div style={{ fontSize: 28 }}>🎮</div>
+        <div>
+          <div style={{ fontFamily: "'Rajdhani', sans-serif", fontSize: 26, fontWeight: 700, letterSpacing: 3, color: "#fff" }}>UNITY ASSET AI</div>
+          <div style={{ fontSize: 11, color: "#475569", letterSpacing: 2 }}>FREE AI-POWERED GAME ASSET GENERATOR</div>
+        </div>
+        <div style={{ marginLeft: "auto", fontSize: 11, color: "#334155", textAlign: "right" }}>
+          <div>✅ Sprites · UI · Environment</div>
+          <div>✅ Unity-ready specs</div>
+        </div>
+      </div>
+
+      <div style={{ maxWidth: 1100, margin: "0 auto", padding: "32px 24px", display: "grid", gridTemplateColumns: "1fr 380px", gap: 28 }}>
+        {/* LEFT */}
+        <div>
+          {/* Category */}
+          <div style={{ marginBottom: 24 }}>
+            <div style={{ fontSize: 11, color: "#475569", letterSpacing: 2, marginBottom: 12 }}>01 — ASSET CATEGORY</div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {CATEGORIES.map((c) => (
+                <button key={c.id} className="cat-btn"
+                  onClick={() => { setActiveCategory(c); setPrompt(""); }}
+                  style={{
+                    background: activeCategory.id === c.id ? c.color : "#111120",
+                    color: activeCategory.id === c.id ? "#000" : "#64748b",
+                    border: `1px solid ${activeCategory.id === c.id ? c.color : "#1e1e3a"}`,
+                  }}>
+                  {c.icon} {c.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Prompt */}
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 11, color: "#475569", letterSpacing: 2, marginBottom: 10 }}>02 — DESCRIBE YOUR ASSET</div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+              {cat.presets.map((p) => (
+                <button key={p} className="preset-chip" onClick={() => handlePreset(p)}>{p}</button>
+              ))}
+            </div>
+            <textarea ref={textareaRef} value={prompt} onChange={(e) => setPrompt(e.target.value)}
+              placeholder={`Describe your ${cat.label.toLowerCase()} asset... (e.g. ${cat.presets[0]})`}
+              rows={3}
+              style={{
+                width: "100%", background: "#0d0d1a", border: `1px solid ${prompt ? cat.color + "55" : "#1e1e3a"}`,
+                borderRadius: 8, padding: "14px 16px", color: "#e2e8f0", fontSize: 14, fontFamily: "inherit",
+                resize: "vertical", lineHeight: 1.6, transition: "border-color 0.2s",
+              }} />
+          </div>
+
+          {/* Style + Color */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 20 }}>
+            <div>
+              <div style={{ fontSize: 11, color: "#475569", letterSpacing: 2, marginBottom: 8 }}>03 — ART STYLE</div>
+              <select value={style} onChange={(e) => setStyle(e.target.value)} style={{
+                width: "100%", background: "#0d0d1a", border: "1px solid #1e1e3a", borderRadius: 8,
+                padding: "10px 14px", color: "#e2e8f0", fontSize: 13, fontFamily: "inherit", cursor: "pointer",
+              }}>
+                {STYLES.map((s) => <option key={s}>{s}</option>)}
+              </select>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: "#475569", letterSpacing: 2, marginBottom: 8 }}>04 — COLOR PALETTE</div>
+              <select value={colorPalette} onChange={(e) => setColorPalette(e.target.value)} style={{
+                width: "100%", background: "#0d0d1a", border: "1px solid #1e1e3a", borderRadius: 8,
+                padding: "10px 14px", color: "#e2e8f0", fontSize: 13, fontFamily: "inherit", cursor: "pointer",
+              }}>
+                {COLORS.map((c) => <option key={c}>{c}</option>)}
+              </select>
+            </div>
+          </div>
+
+          {/* Toggles */}
+          <div style={{ display: "flex", gap: 20, marginBottom: 28 }}>
+            {[
+              { label: "Transparent BG", val: transparent, set: setTransparent },
+              { label: "Animated Sprite", val: animated, set: setAnimated },
+            ].map(({ label, val, set }) => (
+              <label key={label} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+                <div onClick={() => set(!val)} style={{
+                  width: 40, height: 22, borderRadius: 11, background: val ? cat.color : "#1e293b",
+                  position: "relative", transition: "background 0.2s", border: "1px solid #ffffff15",
+                }}>
+                  <div style={{
+                    position: "absolute", top: 2, left: val ? 20 : 2, width: 16, height: 16,
+                    borderRadius: "50%", background: "#fff", transition: "left 0.2s",
+                  }} />
+                </div>
+                <span style={{ fontSize: 13, color: "#64748b" }}>{label}</span>
+              </label>
+            ))}
+          </div>
+
+          {/* Generate */}
+          <button className="gen-btn" onClick={generate} disabled={loading || !prompt.trim()}
+            style={{ background: loading ? "#1e293b" : cat.color, color: loading ? "#475569" : "#000", width: "100%" }}>
+            {loading ? <span className="pulse">⚙ GENERATING ASSET SPECS...</span> : `⚡ GENERATE ${cat.label.toUpperCase()} ASSET`}
+          </button>
+
+          {error && <div style={{ marginTop: 12, color: "#f87171", fontSize: 13, textAlign: "center" }}>{error}</div>}
+        </div>
+
+        {/* RIGHT — Result */}
+        <div>
+          {!result && !loading && (
+            <div style={{ background: "#0d0d1a", border: "1px dashed #1e1e3a", borderRadius: 12, padding: 32, textAlign: "center", color: "#334155" }}>
+              <div style={{ fontSize: 48, marginBottom: 16 }}>🎨</div>
+              <div style={{ fontSize: 13, lineHeight: 1.7 }}>Select a category, describe your asset, and hit generate to get Unity-ready specs, color palettes, settings, and AI image prompts.</div>
+            </div>
+          )}
+
+          {loading && (
+            <div style={{ background: "#0d0d1a", border: `1px solid ${cat.color}33`, borderRadius: 12, padding: 32, textAlign: "center" }}>
+              <div style={{ fontSize: 40, marginBottom: 12 }} className="pulse">⚙️</div>
+              <div style={{ color: cat.color, fontSize: 13, letterSpacing: 2 }} className="pulse">ANALYZING ASSET...</div>
+            </div>
+          )}
+
+          {result && !loading && (
+            <div className="fade-in" style={{ background: "#0d0d1a", border: `1px solid ${cat.color}44`, borderRadius: 12, overflow: "hidden" }}>
+              {/* Asset header */}
+              <div style={{ background: `${cat.color}18`, borderBottom: `1px solid ${cat.color}33`, padding: "16px 20px" }}>
+                <div style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 20, fontWeight: 700, color: cat.color }}>{result.assetName}</div>
+                <div style={{ fontSize: 11, color: "#475569", marginTop: 2 }}>{result.unityType} · {result.resolution}</div>
+              </div>
+
+              <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 16 }}>
+                {/* Description */}
+                <div>
+                  <div style={{ fontSize: 10, color: "#475569", letterSpacing: 2, marginBottom: 6 }}>VISUAL DESCRIPTION</div>
+                  <div style={{ fontSize: 13, color: "#94a3b8", lineHeight: 1.7 }}>{result.description}</div>
+                </div>
+
+                {/* Colors */}
+                {result.colorHex?.length > 0 && (
+                  <div>
+                    <div style={{ fontSize: 10, color: "#475569", letterSpacing: 2, marginBottom: 8 }}>COLOR PALETTE</div>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                      {result.colorHex.map((h, i) => (
+                        <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+                          <span className="hex-swatch" style={{ background: h }} title={h} />
+                          <span style={{ fontSize: 9, color: "#475569" }}>{h}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Layers */}
+                {result.layers?.length > 0 && (
+                  <div>
+                    <div style={{ fontSize: 10, color: "#475569", letterSpacing: 2, marginBottom: 8 }}>LAYERS / COMPONENTS</div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                      {result.layers.map((l, i) => (
+                        <div key={i} style={{ fontSize: 12, color: "#64748b", display: "flex", gap: 8 }}>
+                          <span style={{ color: cat.color }}>▸</span> {l}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Unity Settings */}
+                {result.unitySettings && (
+                  <div>
+                    <div style={{ fontSize: 10, color: "#475569", letterSpacing: 2, marginBottom: 8 }}>UNITY IMPORT SETTINGS</div>
+                    <div style={{ background: "#08080e", borderRadius: 6, padding: "10px 14px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 16px" }}>
+                      {Object.entries(result.unitySettings).map(([k, v]) => (
+                        <div key={k}>
+                          <span style={{ fontSize: 10, color: "#475569" }}>{k}: </span>
+                          <span style={{ fontSize: 12, color: "#94a3b8" }}>{String(v)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Image Prompt */}
+                {result.imagePrompt && (
+                  <div>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                      <div style={{ fontSize: 10, color: "#475569", letterSpacing: 2 }}>AI IMAGE PROMPT</div>
+                      <button className="copy-btn" onClick={copyPrompt}>📋 Copy</button>
+                    </div>
+                    <div style={{ background: "#08080e", borderRadius: 6, padding: "10px 14px", fontSize: 12, color: "#64748b", lineHeight: 1.7, fontStyle: "italic" }}>
+                      {result.imagePrompt}
+                    </div>
+                  </div>
+                )}
+
+                {/* Tips */}
+                {result.tips?.length > 0 && (
+                  <div>
+                    <div style={{ fontSize: 10, color: "#475569", letterSpacing: 2, marginBottom: 8 }}>UNITY TIPS</div>
+                    {result.tips.map((t, i) => (
+                      <div key={i} style={{ fontSize: 12, color: "#64748b", marginBottom: 5, display: "flex", gap: 8 }}>
+                        <span style={{ color: "#fbbf24" }}>💡</span> {t}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Tags */}
+                {result.tags?.length > 0 && (
+                  <div>{result.tags.map((t) => <span className="tag" key={t}>{t}</span>)}</div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* History */}
+          {history.length > 0 && (
+            <div style={{ marginTop: 20 }}>
+              <div style={{ fontSize: 10, color: "#334155", letterSpacing: 2, marginBottom: 10 }}>RECENT ASSETS</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {history.slice(0, 5).map((h, i) => (
+                  <div key={i} className="hist-card" onClick={() => setResult(h.result)}>
+                    <div style={{ fontSize: 12, color: "#94a3b8" }}>{h.result.assetName}</div>
+                    <div style={{ fontSize: 10, color: "#475569" }}>{h.category} · {h.style}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
